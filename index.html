@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fun Fact Wheel</title>
+<style>
+:root{--ink:#172033;--blue:#2563eb;--pale:#eef4ff;--card:#fff;--line:#dbe4f0}*{box-sizing:border-box}
+body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:linear-gradient(135deg,#edf4ff,#faf5ff);color:var(--ink);min-height:100vh}
+main{max-width:960px;margin:auto;padding:28px}.hero{text-align:center;margin:18px 0 24px}.hero h1{font-size:clamp(2rem,6vw,3.6rem);margin:.2rem}.hero p{color:#526078}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:0 16px 45px #32466b18;margin:16px 0}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.grow{flex:1}input,button{font:inherit;border-radius:12px;padding:12px 14px}input{border:1px solid #bdc9da;min-width:0}button{border:0;background:var(--blue);color:#fff;font-weight:700;cursor:pointer}button.secondary{background:#64748b}button:disabled{opacity:.5;cursor:not-allowed}.hidden{display:none!important}
+code,.code{font-family:ui-monospace,monospace;font-size:1.25rem;letter-spacing:.12em;background:#f1f5f9;padding:7px 10px;border-radius:9px}
+#stage{text-align:center}.wheelWrap{position:relative;width:min(630px,90vw);aspect-ratio:1;margin:18px auto}.arrow{position:absolute;z-index:2;top:-13px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:20px solid transparent;border-right:20px solid transparent;border-top:44px solid #ef4444;filter:drop-shadow(0 4px 3px #0004)}canvas{width:100%;height:100%;filter:drop-shadow(0 10px 12px #253a5d33)}
+.people{display:flex;gap:8px;flex-wrap:wrap}.pill{background:#e8f0ff;color:#1e40af;padding:7px 10px;border-radius:999px}.ok{color:#047857}.muted{color:#64748b}.notice{background:#fffbeb;border:1px solid #fde68a;padding:10px;border-radius:10px}
+dialog{border:0;border-radius:20px;padding:24px;width:min(520px,92vw);box-shadow:0 30px 90px #0006}dialog::backdrop{background:#101827aa}.vote{display:block;width:100%;margin:10px 0}.results>div{margin:8px 0}.bar{height:10px;background:#dbeafe;border-radius:99px;overflow:hidden}.bar span{display:block;height:100%;background:#2563eb}
+</style>
+</head><body><main>
+<section class="hero"><h1>🎡 Fun Fact Wheel</h1><p>Join a room, add a fun fact, spin, and vote.</p></section>
+<section id="setup" class="card"><h2>Start or join</h2><div class="row"><button id="create">Create room</button><span class="muted">or</span><input id="roomInput" class="grow" placeholder="Room code"><button id="joinRoom">Join room</button></div></section>
+<section id="join" class="card hidden"><h2>Room <span id="roomCode" class="code"></span></h2><div class="row"><input id="name" class="grow" placeholder="Enter your name" maxlength="40"><button id="start">Start</button></div></section>
+<section id="question" class="card hidden"><h2>What is the fun fact?</h2><div class="row"><input id="fact" class="grow" placeholder="Type a surprising or funny fact" maxlength="160"><button id="submitFact">Submit answer</button></div><p id="submitted" class="ok hidden">✓ Answer submitted. Waiting for the host.</p></section>
+<section id="lobby" class="card hidden"><div class="row"><div class="grow"><h2>Players</h2><div id="people" class="people"></div></div><div><div>Room: <span id="roomCode2" class="code"></span></div><p id="count" class="muted"></p></div></div><p id="hostHint" class="notice hidden">As host, spin when everyone has answered.</p></section>
+<section id="stage" class="card hidden"><h2>Whose fun fact is it?</h2><div class="wheelWrap"><div class="arrow"></div><canvas id="wheel" width="700" height="700"></canvas></div><button id="spin">Spin the wheel</button><p class="muted">The wheel stops after 5 seconds.</p></section>
+<dialog id="voteDialog"><h2>Vote</h2><p id="chosenFact"></p><p>Who do you think submitted this fun fact?</p><div id="voteButtons"></div><button id="closeVote" class="secondary">Close</button><div id="voteResults" class="results"></div></dialog>
+</main>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="config.js"></script>
+<script>
+const $=s=>document.querySelector(s); let room='', me='', playerId='', host=false, facts=[],players={},angle=0,spinning=false;
+if(!window.FIREBASE_CONFIG||!FIREBASE_CONFIG.apiKey){alert('Firebase is not configured. Follow README.md before sharing.');}
+firebase.initializeApp(FIREBASE_CONFIG); const db=firebase.database();
+const rid=()=>Math.random().toString(36).slice(2,8).toUpperCase(); const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function show(id){$(id).classList.remove('hidden')} function ref(p=''){return db.ref(`rooms/${room}/${p}`)}
+$('#create').onclick=async()=>{room=rid();host=true;await ref().set({createdAt:firebase.database.ServerValue.TIMESTAMP,state:'lobby'});openJoin()};
+$('#joinRoom').onclick=async()=>{room=$('#roomInput').value.trim().toUpperCase();if(!room)return;let s=await ref().once('value');if(!s.exists())return alert('Room not found.');openJoin()};
+function openJoin(){$('#setup').classList.add('hidden');show('#join');$('#roomCode').textContent=$('#roomCode2').textContent=room;listen()}
+$('#start').onclick=async()=>{me=$('#name').value.trim();if(!me)return alert('Enter your name.');playerId=db.ref().push().key;await ref('players/'+playerId).set({name:me,answered:false});ref('players/'+playerId).onDisconnect().remove();$('#join').classList.add('hidden');show('#question');show('#lobby');if(host)show('#hostHint')};
+$('#submitFact').onclick=async()=>{let text=$('#fact').value.trim();if(!text)return alert('Enter a fun fact.');await ref('facts/'+playerId).set({text,name:me});await ref('players/'+playerId+'/answered').set(true);$('#fact').disabled=$('#submitFact').disabled=true;show('#submitted')};
+function listen(){ref('players').on('value',s=>{players=s.val()||{};renderPlayers()});ref('facts').on('value',s=>{facts=Object.entries(s.val()||{}).map(([id,v])=>({id,...v}));draw()});ref('state').on('value',s=>{if(s.val()==='wheel')show('#stage')});ref('spin').on('value',s=>{let v=s.val();if(v&&v.at&&!spinning&&Date.now()-v.at<8000)animate(v.index,v.at)});ref('vote').on('value',s=>renderVotes(s.val()||{}))}
+function renderPlayers(){let vals=Object.values(players);$('#people').innerHTML=vals.map(p=>`<span class="pill">${esc(p.name)} ${p.answered?'✓':''}</span>`).join('');let done=vals.filter(p=>p.answered).length;$('#count').textContent=`${done} of ${vals.length} answered`;$('#spin').disabled=!(host&&facts.length>0&&done===vals.length)}
+const colors=['#2563eb','#7c3aed','#db2777','#ea580c','#16a34a','#0891b2','#ca8a04','#4f46e5'];
+function draw(rot=angle){let c=$('#wheel'),x=c.getContext('2d'),n=Math.max(facts.length,1),arc=2*Math.PI/n;x.clearRect(0,0,700,700);x.save();x.translate(350,350);x.rotate(rot);for(let i=0;i<n;i++){x.beginPath();x.moveTo(0,0);x.arc(0,0,330,i*arc,(i+1)*arc);x.fillStyle=colors[i%colors.length];x.fill();x.strokeStyle='white';x.lineWidth=4;x.stroke();x.save();x.rotate((i+.5)*arc);x.textAlign='right';x.fillStyle='white';x.font='700 24px Segoe UI';let t=facts[i]?.text||'Waiting for answers';if(t.length>34)t=t.slice(0,31)+'…';x.fillText(t,300,8);x.restore()}x.restore();}
+$('#spin').onclick=async()=>{if(!host||!facts.length)return;let index=Math.floor(Math.random()*facts.length);await ref('vote').remove();await ref('state').set('wheel');await ref('spin').set({index,at:firebase.database.ServerValue.TIMESTAMP})};
+function animate(index,at){spinning=true;show('#stage');let n=facts.length,arc=2*Math.PI/n,target=-Math.PI/2-(index+.5)*arc;let turns=7+Math.random()*3,start=angle,end=target+turns*2*Math.PI,dur=5000,t0=performance.now();function frame(t){let p=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-p,4);angle=start+(end-start)*e;draw(angle);if(p<1)requestAnimationFrame(frame);else{spinning=false;angle=target;draw(angle);openVote(index)}}requestAnimationFrame(frame)}
+function openVote(index){let f=facts[index];$('#chosenFact').textContent='“'+f.text+'”';$('#voteButtons').innerHTML=Object.entries(players).map(([id,p])=>`<button class="vote" data-id="${id}">${esc(p.name)}</button>`).join('');document.querySelectorAll('.vote').forEach(b=>b.onclick=async()=>{await ref('vote/'+playerId).set({choice:b.dataset.id});document.querySelectorAll('.vote').forEach(x=>x.disabled=true)});$('#voteDialog').showModal()}
+$('#closeVote').onclick=()=>$('#voteDialog').close();
+function renderVotes(votes){let counts={};Object.values(votes).forEach(v=>counts[v.choice]=(counts[v.choice]||0)+1);let total=Math.max(Object.keys(votes).length,1);$('#voteResults').innerHTML=Object.entries(players).map(([id,p])=>`<div>${esc(p.name)}: ${counts[id]||0}<div class="bar"><span style="width:${100*(counts[id]||0)/total}%"></span></div></div>`).join('')}
+</script></body></html>
